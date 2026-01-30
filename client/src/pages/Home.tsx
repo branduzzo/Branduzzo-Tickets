@@ -224,7 +224,7 @@ export default function Home() {
       </Section>
 
       <footer className="py-12 border-t border-border/20 bg-card/20 text-center text-sm text-muted-foreground">
-        <p>&copy; {new Date().getFullYear()} Branduzzo's Tickets. Built for the community.</p>
+        <p>&copy; {new Date().getFullYear()} Branduzzo's Tickets (by Branduzzo).</p>
       </footer>
     </div>
   );
