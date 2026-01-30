@@ -59,7 +59,7 @@ export default function Home() {
         </h1>
         <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
           Create your own professional Discord Ticket Bot in seconds. 
-          No coding knowledge required - just configure and launch.
+          No coding knowledge required, just configure and launch.
         </p>
       </Section>
 

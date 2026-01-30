@@ -1,0 +1,932 @@
+import discord
+from discord.ext import commands
+from discord import app_commands
+from discord.ui import View, Select, Modal, TextInput
+import datetime
+import json
+from pathlib import Path
+from typing import Optional
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+
+
+class [ServerName](commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix="!", intents=intents)
+
+    async def setup_hook(self):
+        synced = await self.tree.sync()
+        print(f"Commandes slash synchronisées : {[c.name for c in synced]}")
+
+
+bot = [ServerName]()
+
+TICKETS_DATA_FILE = "tickets_data.json"
+TRANSCRIPT_DIR = Path("transcripts")
+TRANSCRIPT_DIR.mkdir(exist_ok=True)
+
+COULEUR_PRINCIPALE = discord.Color.from_rgb(128, 0, 255)
+COULEUR_SUCCES = discord.Color.from_rgb(0, 200, 100)
+COULEUR_ERREUR = discord.Color.from_rgb(255, 50, 50)
+
+CATEGORIES_TICKETS = {
+    "🎮 Support Général": "support-general",
+    "🤝 Partnership": "partnership",
+    "🔐 Compte / Réinitialiser Mot de Passe": "account-reset",
+    "🛒 Boutique / Transfert VIP": "store-vip",
+    "🐛 Signaler un Bug/Joueur": "bug-player"
+}
+
+QUESTIONS_TICKETS = {
+    "support-general": [
+        {
+            "key": "minecraft_name",
+            "label": "Nom Minecraft",
+            "placeholder": "Entrez votre pseudo Minecraft",
+            "long": False,
+            "required": True
+        },
+        {
+            "key": "what_do_you_need",
+            "label": "De quoi avez-vous besoin ?",
+            "placeholder": "Décrivez en détail ce dont vous avez besoin",
+            "long": True,
+            "required": True
+        }
+    ],
+    "partnership": [
+        {
+            "key": "discord_server_name",
+            "label": "Nom du Serveur Discord",
+            "placeholder": "Entrez le nom de votre serveur",
+            "long": False,
+            "required": True
+        },
+        {
+            "key": "discord_link",
+            "label": "Lien Discord",
+            "placeholder": "https://discord.gg/...",
+            "long": False,
+            "required": True
+        },
+        {
+            "key": "members",
+            "label": "Nombre de membres ?",
+            "placeholder": "Nombre approximatif de membres",
+            "long": False,
+            "required": True
+        },
+        {
+            "key": "partnership_description",
+            "label": "Description de la Partnership",
+            "placeholder": "Expliquez pourquoi vous souhaitez une partnership avec nous",
+            "long": True,
+            "required": True
+        }
+    ],
+    "account-reset": [
+        {
+            "key": "minecraft_name",
+            "label": "Nom Minecraft",
+            "placeholder": "Entrez votre pseudo",
+            "long": False,
+            "required": True
+        },
+        {
+            "key": "is_premium",
+            "label": "Êtes-vous Premium ?",
+            "placeholder": "Oui / Non",
+            "long": False,
+            "required": True
+        },
+        {
+            "key": "ip",
+            "label": "Adresse IP de connexion",
+            "placeholder": "Entrez votre IP (si vous la connaissez)",
+            "long": False,
+            "required": False
+        },
+        {
+            "key": "problem",
+            "label": "Décrivez le problème",
+            "placeholder": "Expliquez ce qui ne fonctionne pas avec votre compte",
+            "long": True,
+            "required": True
+        }
+    ],
+    "store-vip": [
+        {
+            "key": "minecraft_name",
+            "label": "Nom Minecraft",
+            "placeholder": "Entrez votre pseudo",
+            "long": False,
+            "required": True
+        },
+        {
+            "key": "transaction_id",
+            "label": "ID de Transaction",
+            "placeholder": "ID de transaction PayPal/Stripe (si disponible)",
+            "long": False,
+            "required": False
+        },
+        {
+            "key": "describe_issue",
+            "label": "Décrivez le problème",
+            "placeholder": "Expliquez le problème lié à la boutique ou au transfert VIP",
+            "long": True,
+            "required": True
+        }
+    ],
+    "bug-player": [
+        {
+            "key": "minecraft_name",
+            "label": "Nom Minecraft",
+            "placeholder": "Votre pseudo",
+            "long": False,
+            "required": True
+        },
+        {
+            "key": "report_type",
+            "label": "Type de signalement",
+            "placeholder": "Bug / Joueur",
+            "long": False,
+            "required": True
+        },
+        {
+            "key": "player_or_bug_name",
+            "label": "Nom du joueur/bug",
+            "placeholder": "Nom du joueur à signaler ou du bug",
+            "long": False,
+            "required": True
+        },
+        {
+            "key": "description",
+            "label": "Description détaillée",
+            "placeholder": "Expliquez ce qui s'est passé en détail",
+            "long": True,
+            "required": True
+        },
+        {
+            "key": "proof",
+            "label": "Preuves (lien/description)",
+            "placeholder": "Lien vers capture d'écran, vidéo ou autres preuves",
+            "long": True,
+            "required": True
+        }
+    ]
+}
+
+
+def charger_donnees():
+    if Path(TICKETS_DATA_FILE).exists():
+        with open(TICKETS_DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"tickets": {}, "closed": {}}
+
+
+def sauvegarder_donnees(data):
+    with open(TICKETS_DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+class TicketFormModal(Modal):
+    def __init__(self, category: str, staff_role: discord.Role,
+                 open_category: discord.CategoryChannel,
+                 closed_category: discord.CategoryChannel,
+                 logs_channel: discord.TextChannel):
+        questions = QUESTIONS_TICKETS.get(category, [])
+        category_name = next((k.split(" ", 1)[1] for k, v in CATEGORIES_TICKETS.items() if v == category), category)
+        super().__init__(title=f"Ticket : {category_name}", timeout=600)
+
+        self.category = category
+        self.staff_role = staff_role
+        self.open_category = open_category
+        self.closed_category = closed_category
+        self.logs_channel = logs_channel
+        self.inputs = {}
+
+        for question in questions[:5]:
+            input_field = TextInput(
+                label=question["label"],
+                placeholder=question["placeholder"],
+                style=discord.TextStyle.paragraph if question["long"] else discord.TextStyle.short,
+                required=question["required"],
+                max_length=4000 if question["long"] else 100
+            )
+            self.add_item(input_field)
+            self.inputs[question["key"]] = input_field
+
+    async def on_submit(self, interaction: discord.Interaction):
+        answers = {k: v.value for k, v in self.inputs.items()}
+        await ouvrir_ticket(
+            interaction,
+            self.category,
+            self.staff_role,
+            self.open_category,
+            self.closed_category,
+            self.logs_channel,
+            answers
+        )
+
+
+class TicketSelectView(View):
+    def __init__(self, staff_role: discord.Role,
+                 open_category: discord.CategoryChannel,
+                 closed_category: discord.CategoryChannel,
+                 logs_channel: discord.TextChannel):
+        super().__init__(timeout=None)
+        self.staff_role = staff_role
+        self.open_category = open_category
+        self.closed_category = closed_category
+        self.logs_channel = logs_channel
+
+        options = []
+        for emoji_label, value in CATEGORIES_TICKETS.items():
+            emoji = emoji_label.split(" ")[0]
+            label = emoji_label.split(" ", 1)[1]
+            options.append(discord.SelectOption(label=label, value=value, emoji=emoji))
+
+        select = Select(
+            placeholder="🎫 Sélectionnez le type de ticket...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="ticket_select"
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        category = interaction.data["values"][0]
+        modal = TicketFormModal(
+            category,
+            self.staff_role,
+            self.open_category,
+            self.closed_category,
+            self.logs_channel
+        )
+        await interaction.response.send_modal(modal)
+
+
+class TicketButtonView(View):
+    def __init__(self, ticket_owner_id: int, staff_role: discord.Role,
+                 closed_category: discord.CategoryChannel,
+                 logs_channel: discord.TextChannel,
+                 ticket_channel_id: int):
+        super().__init__(timeout=None)
+        self.ticket_owner_id = ticket_owner_id
+        self.staff_role = staff_role
+        self.closed_category = closed_category
+        self.logs_channel = logs_channel
+        self.ticket_channel_id = ticket_channel_id
+
+    @discord.ui.button(label="Claim", style=discord.ButtonStyle.primary, emoji="✋", custom_id="claim_ticket")
+    async def claim_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await claim_ticket(interaction, self.staff_role, self.logs_channel, self.ticket_channel_id)
+
+    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="close_ticket")
+    async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await fermer_ticket(
+            interaction,
+            self.ticket_owner_id,
+            self.staff_role,
+            self.closed_category,
+            self.logs_channel,
+            self.ticket_channel_id
+        )
+
+
+async def ouvrir_ticket(interaction: discord.Interaction, category: str,
+                        staff_role: discord.Role,
+                        open_category: discord.CategoryChannel,
+                        closed_category: discord.CategoryChannel,
+                        logs_channel: discord.TextChannel,
+                        answers_form: dict):
+    await interaction.response.defer(ephemeral=True)
+
+    data = charger_donnees()
+    user = interaction.user
+
+    for ticket_id, ticket_info in data["tickets"].items():
+        if ticket_info["owner_id"] == user.id and not ticket_info["closed"]:
+            channel = interaction.guild.get_channel(int(ticket_id))
+            if channel:
+                await interaction.followup.send(
+                    f"❌ Vous avez déjà un ticket ouvert : {channel.mention}",
+                    ephemeral=True
+                )
+                return
+
+    name_ticket = f"ticket-{user.name}".lower().replace(" ", "-")[:50]
+
+    permissions = {
+        user: discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            attach_files=True,
+            embed_links=True
+        ),
+        interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        staff_role: discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            attach_files=True,
+            embed_links=True,
+            manage_messages=True
+        )
+    }
+
+    try:
+        ticket_channel = await open_category.create_text_channel(
+            name_ticket,
+            overwrites=permissions,
+            topic=f"Ticket de {user.name} ({user.id}) - Catégorie : {category}"
+        )
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ Erreur lors de la création du ticket : {str(e)}",
+            ephemeral=True
+        )
+        return
+
+    data["tickets"][str(ticket_channel.id)] = {
+        "owner_id": user.id,
+        "owner_name": user.name,
+        "category": category,
+        "claimed_by": None,
+        "claimed_at": None,
+        "created_at": datetime.datetime.now().isoformat(),
+        "closed": False,
+        "form_answers": answers_form
+    }
+    sauvegarder_donnees(data)
+
+    embed_open = discord.Embed(
+        title="🎫 Ticket Ouvert",
+        description=f"Bonjour {user.mention} !\\n\\nVotre ticket a été ouvert avec succès. Un membre du staff vous répondra dès que possible.\\n\\n**Catégorie** : `{category}`",
+        color=COULEUR_PRINCIPALE,
+        timestamp=datetime.datetime.now()
+    )
+
+    if answers_form:
+        for key, value in answers_form.items():
+            label = key.replace('_', ' ').title()
+            embed_open.add_field(
+                name=f"📝 {label}",
+                value=value[:1024] if value else "N/A",
+                inline=False
+            )
+
+    embed_open.set_footer(
+        text=f"ID Ticket : {ticket_channel.id}",
+        icon_url=user.display_avatar.url
+    )
+
+    view = TicketButtonView(
+        user.id,
+        staff_role,
+        closed_category,
+        logs_channel,
+        ticket_channel.id
+    )
+    await ticket_channel.send(
+        content=f"{user.mention} {staff_role.mention}",
+        embed=embed_open,
+        view=view
+    )
+
+    embed_logs = discord.Embed(
+        title="📝 Nouveau Ticket Ouvert",
+        color=COULEUR_SUCCES,
+        timestamp=datetime.datetime.now()
+    )
+    embed_logs.add_field(name="👤 Utilisateur", value=f"{user.mention} (`{user.id}`)", inline=True)
+    embed_logs.add_field(name="📂 Catégorie", value=f"`{category}`", inline=True)
+    embed_logs.add_field(name="💬 Salon", value=ticket_channel.mention, inline=True)
+    embed_logs.add_field(name="🆔 ID Ticket", value=f"`{ticket_channel.id}`", inline=False)
+
+    await logs_channel.send(embed=embed_logs)
+
+    await interaction.followup.send(
+        f"✅ Ticket créé avec succès ! Rendez-vous sur {ticket_channel.mention}",
+        ephemeral=True
+    )
+
+
+async def claim_ticket(interaction: discord.Interaction,
+                       staff_role: discord.Role,
+                       logs_channel: discord.TextChannel,
+                       ticket_channel_id: int):
+    if staff_role not in interaction.user.roles:
+        embed_error = discord.Embed(
+            title="❌ Erreur",
+            description="Vous n'avez pas la permission de claimer ce ticket.",
+            color=COULEUR_ERREUR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    data = charger_donnees()
+    ticket_key = str(ticket_channel_id)
+
+    if ticket_key not in data["tickets"]:
+        await interaction.response.send_message(
+            "❌ Erreur : Ticket non trouvé dans la base de données.",
+            ephemeral=True
+        )
+        return
+
+    if data["tickets"][ticket_key]["claimed_by"] is not None:
+        claimer_id = data["tickets"][ticket_key]["claimed_by"]
+        embed_error = discord.Embed(
+            title="❌ Ticket déjà claimé",
+            description=f"Ce ticket a déjà été claimé par <@{claimer_id}>.",
+            color=COULEUR_ERREUR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    data["tickets"][ticket_key]["claimed_by"] = interaction.user.id
+    data["tickets"][ticket_key]["claimed_at"] = datetime.datetime.now().isoformat()
+    sauvegarder_donnees(data)
+
+    embed_claim = discord.Embed(
+        title="✋ Ticket Claimé",
+        description=f"**{interaction.user.mention}** a pris en charge ce ticket.",
+        color=COULEUR_SUCCES,
+        timestamp=datetime.datetime.now()
+    )
+    embed_claim.set_thumbnail(url=interaction.user.display_avatar.url)
+
+    await interaction.response.send_message(embed=embed_claim)
+
+    embed_logs = discord.Embed(
+        title="📝 Ticket Claimé",
+        color=COULEUR_SUCCES,
+        timestamp=datetime.datetime.now()
+    )
+    embed_logs.add_field(name="👤 Staff", value=interaction.user.mention, inline=True)
+    embed_logs.add_field(name="🆔 ID Ticket", value=f"`{ticket_channel_id}`", inline=True)
+
+    await logs_channel.send(embed=embed_logs)
+
+
+async def fermer_ticket(interaction: discord.Interaction,
+                        ticket_owner_id: int,
+                        staff_role: discord.Role,
+                        closed_category: discord.CategoryChannel,
+                        logs_channel: discord.TextChannel,
+                        ticket_channel_id: int):
+    if staff_role not in interaction.user.roles and interaction.user.id != ticket_owner_id:
+        embed_error = discord.Embed(
+            title="❌ Erreur",
+            description="Vous n'avez pas la permission de fermer ce ticket.",
+            color=COULEUR_ERREUR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    data = charger_donnees()
+    ticket_key = str(ticket_channel_id)
+
+    if ticket_key not in data["tickets"]:
+        await interaction.followup.send("❌ Ticket non trouvé.", ephemeral=True)
+        return
+
+    ticket_data = data["tickets"][ticket_key]
+    channel = interaction.channel
+
+    try:
+        messages = [msg async for msg in channel.history(limit=500, oldest_first=True)]
+
+        transcript_content = "=" * 70 + "\\n"
+        transcript_content += f"TRANSCRIPT TICKET - GalacticalMC\\n"
+        transcript_content += "=" * 70 + "\\n\\n"
+        transcript_content += f"📋 ID Ticket : {ticket_channel_id}\\n"
+        transcript_content += f"👤 Utilisateur : {ticket_data['owner_name']} (ID : {ticket_data['owner_id']})\\n"
+        transcript_content += f"📂 Catégorie : {ticket_data['category']}\\n"
+        transcript_content += f"📅 Ouverture : {ticket_data['created_at']}\\n"
+
+        if ticket_data["claimed_by"]:
+            transcript_content += f"✋ Claimé par : <@{ticket_data['claimed_by']}> (ID : {ticket_data['claimed_by']})\\n"
+            if ticket_data.get("claimed_at"):
+                transcript_content += f"🕐 Claimé le : {ticket_data['claimed_at']}\\n"
+
+        transcript_content += f"🔒 Fermé par : {interaction.user.name} (ID : {interaction.user.id})\\n"
+        transcript_content += f"🕐 Fermé le : {datetime.datetime.now().isoformat()}\\n"
+
+        if ticket_data.get("form_answers"):
+            transcript_content += f"\\n{'=' * 70}\\n"
+            transcript_content += f"RÉPONSES DU FORMULAIRE\\n"
+            transcript_content += f"{'=' * 70}\\n\\n"
+            for key, value in ticket_data["form_answers"].items():
+                transcript_content += f"{key.replace('_', ' ').title()} : {value}\\n"
+
+        transcript_content += f"\\n{'=' * 70}\\n"
+        transcript_content += f"MESSAGES\\n"
+        transcript_content += f"{'=' * 70}\\n\\n"
+
+        for msg in messages:
+            timestamp = msg.created_at.strftime("%d/%m/%Y %H:%M:%S")
+            author = f"{msg.author.name}#{msg.author.discriminator}" if msg.author.discriminator != "0" else msg.author.name
+            content = msg.content if msg.content else "[Contenu multimédia/Embed]"
+
+            transcript_content += f"[{timestamp}] {author}:\\n{content}\\n"
+
+            if msg.attachments:
+                transcript_content += f"  📎 Fichiers joints : {', '.join([att.url for att in msg.attachments])}\\n"
+
+            transcript_content += "\\n"
+
+        timestamp_file = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        transcript_path = TRANSCRIPT_DIR / f"ticket_{ticket_channel_id}_{timestamp_file}.txt"
+
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            f.write(transcript_content)
+
+    except Exception as e:
+        print(f"Erreur lors de la création du transcript : {e}")
+        transcript_path = None
+
+    if transcript_path and transcript_path.exists():
+        try:
+            owner = await bot.fetch_user(ticket_owner_id)
+            transcript_file = discord.File(transcript_path)
+
+            embed_transcript = discord.Embed(
+                title="📄 Transcript du Ticket",
+                description=f"Votre ticket a été fermé. Voici le transcript complet de la conversation.",
+                color=COULEUR_PRINCIPALE,
+                timestamp=datetime.datetime.now()
+            )
+            embed_transcript.add_field(name="ID Ticket", value=f"`{ticket_channel_id}`", inline=True)
+            embed_transcript.add_field(name="Catégorie", value=f"`{ticket_data['category']}`", inline=True)
+            embed_transcript.set_footer(text="GalacticalMC Ticket System")
+
+            await owner.send(embed=embed_transcript, file=transcript_file)
+        except discord.Forbidden:
+            print(f"Impossible d'envoyer le transcript à {ticket_data['owner_name']} (DM fermés)")
+        except Exception as e:
+            print(f"Erreur lors de l'envoi du transcript : {e}")
+
+    if transcript_path and transcript_path.exists():
+        try:
+            transcript_file = discord.File(transcript_path)
+
+            embed_logs_close = discord.Embed(
+                title="📝 Transcript Sauvegardé",
+                color=COULEUR_SUCCES,
+                timestamp=datetime.datetime.now()
+            )
+            embed_logs_close.add_field(name="👤 Utilisateur", value=f"<@{ticket_owner_id}>", inline=True)
+            embed_logs_close.add_field(name="🔒 Fermé par", value=interaction.user.mention, inline=True)
+            embed_logs_close.add_field(name="🆔 ID Ticket", value=f"`{ticket_channel_id}`", inline=False)
+
+            await logs_channel.send(embed=embed_logs_close, file=transcript_file)
+        except Exception as e:
+            print(f"Erreur lors de l'envoi du transcript aux logs : {e}")
+
+    category = ticket_data["category"]
+    if category not in data["closed"]:
+        data["closed"][category] = 0
+    data["closed"][category] += 1
+    counter = data["closed"][category]
+
+    new_name = f"ferme-{counter}"
+
+    try:
+        await channel.edit(
+            name=new_name,
+            category=closed_category,
+            sync_permissions=True
+        )
+    except Exception as e:
+        print(f"Erreur lors du déplacement du salon : {e}")
+
+    try:
+        await channel.set_permissions(
+            interaction.guild.get_member(ticket_owner_id),
+            view_channel=False,
+            send_messages=False,
+            read_message_history=False
+        )
+    except:
+        pass
+
+    embed_closure = discord.Embed(
+        title="🔒 Ticket Fermé",
+        description=f"Ce ticket a été fermé par **{interaction.user.mention}**.\\n\\nLe transcript a été sauvegardé et envoyé à l'utilisateur.",
+        color=COULEUR_ERREUR,
+        timestamp=datetime.datetime.now()
+    )
+    embed_closure.add_field(name="Fermé par", value=interaction.user.mention, inline=True)
+    embed_closure.add_field(name="Nouveau nom", value=f"`{new_name}`", inline=True)
+
+    await channel.send(embed=embed_closure)
+
+    data["tickets"][ticket_key]["closed"] = True
+    data["tickets"][ticket_key]["closed_by"] = interaction.user.id
+    data["tickets"][ticket_key]["closed_at"] = datetime.datetime.now().isoformat()
+    sauvegarder_donnees(data)
+
+    embed_logs_final = discord.Embed(
+        title="📝 Ticket Fermé",
+        color=COULEUR_ERREUR,
+        timestamp=datetime.datetime.now()
+    )
+    embed_logs_final.add_field(name="👤 Utilisateur", value=f"<@{ticket_owner_id}>", inline=True)
+    embed_logs_final.add_field(
+        name="✋ Claimé par",
+        value=f"<@{ticket_data['claimed_by']}>" if ticket_data.get("claimed_by") else "Non claimé",
+        inline=True
+    )
+    embed_logs_final.add_field(name="🔒 Fermé par", value=interaction.user.mention, inline=True)
+    embed_logs_final.add_field(name="📝 Nouveau nom", value=f"`{new_name}`", inline=True)
+    embed_logs_final.add_field(name="🆔 ID", value=f"`{ticket_channel_id}`", inline=True)
+
+    await logs_channel.send(embed=embed_logs_final)
+
+
+@bot.tree.command(name="support", description="Crée le panneau des tickets")
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.describe(
+    channel="Salon où envoyer le panneau",
+    open_category="Catégorie pour les tickets ouverts",
+    closed_category="Catégorie pour les tickets fermés",
+    logs_channel="Salon pour les logs",
+    staff_role="Rôle staff qui gère les tickets",
+    image_url="URL de l'image pour l'embed (optionnel)"
+)
+async def support(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    open_category: discord.CategoryChannel,
+    closed_category: discord.CategoryChannel,
+    logs_channel: discord.TextChannel,
+    staff_role: discord.Role,
+    image_url: Optional[str] = None
+):
+    embed_support = discord.Embed(
+        title="🎫 [ServerName] - Système de Tickets",
+        description=(
+            "**Bienvenue dans le système de support de [ServerName] !**\\n\\n"
+            "Si vous avez besoin d'aide, souhaitez signaler un problème ou poser des questions, "
+            "ouvrez un ticket en sélectionnant la catégorie appropriée dans le menu ci‑dessous.\\n\\n"
+            "📋 **Instructions :**\\n"
+            "• Sélectionnez la catégorie qui décrit le mieux votre demande\\n"
+            "• Remplissez le formulaire avec toutes les informations requises\\n"
+            "• Attendez qu'un membre du staff prenne en charge le ticket\\n\\n"
+            "⚠️ **Attention :** Ne créez pas de tickets troll ou spam, vous serez sanctionné !\\n"
+            "Fournissez toujours des détails clairs et, si nécessaire, joignez des preuves (captures d'écran/vidéos)."
+        ),
+        color=COULEUR_PRINCIPALE,
+        timestamp=datetime.datetime.now()
+    )
+
+    if image_url:
+        embed_support.set_thumbnail(url=image_url)
+
+    embed_support.set_footer(
+        text="Sélectionnez une catégorie dans le menu pour ouvrir un ticket",
+        icon_url=interaction.guild.icon.url if interaction.guild.icon else None
+    )
+
+    view = TicketSelectView(
+        staff_role,
+        open_category,
+        closed_category,
+        logs_channel
+    )
+
+    await channel.send(embed=embed_support, view=view)
+
+    await interaction.response.send_message(
+        f"✅ Panneau de tickets créé avec succès dans {channel.mention} !",
+        ephemeral=True
+    )
+
+
+@bot.tree.command(name="claim", description="Prendre en charge le ticket actuel")
+async def claim_command(interaction: discord.Interaction):
+    data = charger_donnees()
+    ticket_key = str(interaction.channel.id)
+
+    if ticket_key not in data["tickets"]:
+        embed_error = discord.Embed(
+            title="❌ Erreur",
+            description="Cette commande ne peut être utilisée que dans un salon ticket.",
+            color=COULEUR_ERREUR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    staff_role = discord.utils.get(interaction.guild.roles, name="Staff")
+    if not staff_role:
+        await interaction.response.send_message(
+            "❌ Rôle 'Staff' introuvable.",
+            ephemeral=True
+        )
+        return
+
+    logs_channel = discord.utils.get(interaction.guild.text_channels, name="ticket-logs")
+    if not logs_channel:
+        logs_channel = interaction.channel
+
+    await claim_ticket(interaction, staff_role, logs_channel, interaction.channel.id)
+
+
+@bot.tree.command(name="unclaim", description="Relâcher le ticket actuel")
+async def unclaim_command(interaction: discord.Interaction):
+    data = charger_donnees()
+    ticket_key = str(interaction.channel.id)
+
+    if ticket_key not in data["tickets"]:
+        embed_error = discord.Embed(
+            title="❌ Erreur",
+            description="Cette commande ne peut être utilisée que dans un salon ticket.",
+            color=COULEUR_ERREUR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    staff_role = discord.utils.get(interaction.guild.roles, name="Staff")
+    ticket_data = data["tickets"][ticket_key]
+
+    if data["tickets"][ticket_key]["claimed_by"] != interaction.user.id:
+        if not staff_role or staff_role not in interaction.user.roles:
+            embed_error = discord.Embed(
+                title="❌ Erreur",
+                description="Seule la personne qui a claimé le ticket peut le relâcher.",
+                color=COULEUR_ERREUR
+            )
+            await interaction.response.send_message(embed=embed_error, ephemeral=True)
+            return
+
+    data["tickets"][ticket_key]["claimed_by"] = None
+    data["tickets"][ticket_key]["claimed_at"] = None
+    sauvegarder_donnees(data)
+
+    embed_unclaim = discord.Embed(
+        title="🔓 Ticket Relâché",
+        description=f"{interaction.user.mention} a relâché ce ticket.\\n\\nIl peut maintenant être claimé par un autre membre du staff.",
+        color=COULEUR_PRINCIPALE,
+        timestamp=datetime.datetime.now()
+    )
+
+    await interaction.response.send_message(embed=embed_unclaim)
+
+
+@bot.tree.command(name="close", description="Fermer le ticket actuel")
+async def close_command(interaction: discord.Interaction):
+    data = charger_donnees()
+    ticket_key = str(interaction.channel.id)
+
+    if ticket_key not in data["tickets"]:
+        embed_error = discord.Embed(
+            title="❌ Erreur",
+            description="Cette commande ne peut être utilisée que dans un salon ticket.",
+            color=COULEUR_ERREUR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    ticket_data = data["tickets"][ticket_key]
+
+    if ticket_data["closed"]:
+        await interaction.response.send_message(
+            "❌ Ce ticket est déjà fermé.",
+            ephemeral=True
+        )
+        return
+
+    owner_id = ticket_data["owner_id"]
+
+    staff_role = discord.utils.get(interaction.guild.roles, name="Staff")
+    closed_category = discord.utils.get(interaction.guild.categories, name="Tickets Fermés")
+    logs_channel = discord.utils.get(interaction.guild.text_channels, name="ticket-logs")
+
+    if not closed_category:
+        closed_category = interaction.channel.category
+
+    if not logs_channel:
+        logs_channel = interaction.channel
+
+    await fermer_ticket(
+        interaction,
+        owner_id,
+        staff_role,
+        closed_category,
+        logs_channel,
+        interaction.channel.id
+    )
+
+
+@bot.tree.command(name="add", description="Ajouter un utilisateur au ticket")
+@app_commands.describe(user="L'utilisateur à ajouter au ticket")
+async def add_user(interaction: discord.Interaction, user: discord.Member):
+    data = charger_donnees()
+    ticket_key = str(interaction.channel.id)
+
+    if ticket_key not in data["tickets"]:
+        await interaction.response.send_message(
+            "❌ Ce n'est pas un salon ticket.",
+            ephemeral=True
+        )
+        return
+
+    staff_role = discord.utils.get(interaction.guild.roles, name="Staff")
+    ticket_data = data["tickets"][ticket_key]
+
+    if staff_role not in interaction.user.roles and interaction.user.id != ticket_data["owner_id"]:
+        await interaction.response.send_message(
+            "❌ Vous n'avez pas la permission d'ajouter des utilisateurs.",
+            ephemeral=True
+        )
+        return
+
+    await interaction.channel.set_permissions(
+        user,
+        view_channel=True,
+        send_messages=True,
+        read_message_history=True
+    )
+
+    embed = discord.Embed(
+        title="✅ Utilisateur Ajouté",
+        description=f"{user.mention} a été ajouté au ticket.",
+        color=COULEUR_SUCCES
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="remove", description="Retirer un utilisateur du ticket")
+@app_commands.describe(user="L'utilisateur à retirer du ticket")
+async def remove_user(interaction: discord.Interaction, user: discord.Member):
+    data = charger_donnees()
+    ticket_key = str(interaction.channel.id)
+
+    if ticket_key not in data["tickets"]:
+        await interaction.response.send_message(
+            "❌ Ce n'est pas un salon ticket.",
+            ephemeral=True
+        )
+        return
+
+    staff_role = discord.utils.get(interaction.guild.roles, name="Staff")
+    ticket_data = data["tickets"][ticket_key]
+
+    if staff_role not in interaction.user.roles:
+        await interaction.response.send_message(
+            "❌ Seul le staff peut retirer des utilisateurs.",
+            ephemeral=True
+        )
+        return
+
+    if user.id == ticket_data["owner_id"]:
+        await interaction.response.send_message(
+            "❌ Vous ne pouvez pas retirer le propriétaire du ticket.",
+            ephemeral=True
+        )
+        return
+
+    await interaction.channel.set_permissions(user, overwrite=None)
+
+    embed = discord.Embed(
+        title="✅ Utilisateur Retiré",
+        description=f"{user.mention} a été retiré du ticket.",
+        color=COULEUR_SUCCES
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.command()
+@commands.is_owner()
+async def sync(ctx):
+    synced = await bot.tree.sync()
+    await ctx.send(f"✅ Synchronisés {len(synced)} commandes : {[c.name for c in synced]}")
+
+
+@bot.event
+async def on_ready():
+    print(f"✅ Bot connecté en tant que {bot.user}")
+    print(f"📊 Serveurs : {len(bot.guilds)}")
+    print(f"👥 Utilisateurs : {len(bot.users)}")
+
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name="[ServerName]"
+        ),
+        status=discord.Status.online
+    )
+
+
+bot.run("[TOKEN]")
