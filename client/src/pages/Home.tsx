@@ -22,13 +22,13 @@ import { motion } from "framer-motion";
 export default function Home() {
   const [botName, setBotName] = useState("");
   const [token, setToken] = useState("");
-  
+
   const generateMutation = useGenerateBot();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!botName.trim() || !token.trim()) return;
-    
+
     generateMutation.mutate({
       botName,
       token
@@ -178,7 +178,7 @@ export default function Home() {
             </p>
             <div className="bg-secondary/50 p-3 rounded-lg border border-border/50 text-sm">
               <strong className="text-primary block mb-1">Important:</strong>
-              Enable "Server Members Intent" and "Message Content Intent" under the Privileged Gateway Intents section.
+              Enable "Server Members Intent" and "Message Content Intent" under the Gateway Intents section.
             </div>
           </GuideCard>
 
@@ -222,15 +222,12 @@ export default function Home() {
           </GuideCard>
         </div>
       </Section>
-
-      <footer className="py-12 border-t border-border/20 bg-card/20 text-center text-sm text-muted-foreground">
-        <p>&copy; {new Date().getFullYear()} Branduzzo's Tickets (by Branduzzo).</p>
-      </footer>
+      
     </div>
   );
-}
+} 
 
-function GuideCard({ icon, title, step, children }: { icon: React.ReactNode, title: string, step: string, children: React.ReactNode }) {
+function GuideCard({ icon, title, step, children }: { icon: React.ReactNode; title: string; step: string; children: React.ReactNode }) {
   return (
     <motion.div 
       whileHover={{ y: -5 }}
