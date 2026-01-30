@@ -178,7 +178,7 @@ export default function Home() {
             </p>
             <div className="bg-secondary/50 p-3 rounded-lg border border-border/50 text-sm">
               <strong className="text-primary block mb-1">Important:</strong>
-              Enable "Server Members Intent" and "Message Content Intent" under the Gateway Intents section.
+              Enable "Server Members Intent" and "Message Content Intent" under the Privileged Gateway Intents section.
             </div>
           </GuideCard>
 
@@ -222,9 +222,8 @@ export default function Home() {
           </GuideCard>
         </div>
       </Section>
-      
     </div>
-  );
+  ); 
 } 
 
 function GuideCard({ icon, title, step, children }: { icon: React.ReactNode; title: string; step: string; children: React.ReactNode }) {

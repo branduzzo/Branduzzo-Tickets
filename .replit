@@ -1,0 +1,14 @@
+run = "npm run dev"
+modules = ["nodejs-20"]
+
+[packager]
+language = "nodejs"
+languageVersion = "20"
+
+[nix]
+channel = "stable-23_11"
+modules = ["nodejs-20"]
+
+[[ports]]
+localPort = 5000
+externalPort = 80
