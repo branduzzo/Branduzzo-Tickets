@@ -13,7 +13,7 @@ export async function registerRoutes(
   
   app.post(api.generate.path, async (req, res) => {
     try {
-      const { botName, token } = api.generate.input.parse(req.body);
+      const { botName, token, language } = api.generate.input.parse(req.body);
 
       // Read the template file
       const templatePath = path.join(process.cwd(), "attached_assets", "main_1769782315149.txt");

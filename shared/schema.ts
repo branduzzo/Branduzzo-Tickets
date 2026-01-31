@@ -13,6 +13,8 @@ export const users = pgTable("users", {
 export const generateBotSchema = z.object({
   botName: z.string().min(1, "Bot name is required").max(50),
   token: z.string().min(1, "Bot token is required"),
+  language: z.enum(["en", "it", "es"]).default("en"),
 });
 
 export type GenerateBotRequest = z.infer<typeof generateBotSchema>;
+export type Language = "en" | "it" | "es";
