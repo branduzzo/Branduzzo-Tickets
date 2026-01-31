@@ -15,42 +15,42 @@ export async function registerRoutes(
     try {
       const { botName, token, language } = api.generate.input.parse(req.body);
 
-      // Read the template file
-      const templatePath = path.join(process.cwd(), "attached_assets", "main_1769782315149.txt");
+      // Select template based on language
+      const templateFiles: Record<string, string> = {
+        en: "main_en.txt",
+        it: "main_it.txt",
+        es: "main_es.txt"
+      };
+      const templateFile = templateFiles[language] || "main_en.txt";
+      const templatePath = path.join(process.cwd(), "attached_assets", templateFile);
       let content = await fs.readFile(templatePath, "utf-8");
 
       // Sanitize bot name for class usage (PascalCase, no spaces/special chars)
-      // Example: "My Bot!" -> "MyBot"
       const className = botName
-        .replace(/[^a-zA-Z0-9]/g, " ") // replace special chars with space
+        .replace(/[^a-zA-Z0-9]/g, " ")
         .split(" ")
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1)) // Capitalize words
-        .join("") || "MyBot"; // Default if empty
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join("") || "MyBot";
 
-      // Perform Replacements
-      
-      // 1. Replace Class Definition
-      // class GalacticalMC(commands.Bot): -> class [ClassName](commands.Bot):
+      // Replace class definition placeholder
+      content = content.replace(/class \[ServerName\]\(commands\.Bot\):/g, `class ${className}(commands.Bot):`);
       content = content.replace(/class GalacticalMC\(commands\.Bot\):/g, `class ${className}(commands.Bot):`);
 
-      // 2. Replace Instantiation placeholder
-      // bot = [ServerName]() -> bot = [ClassName]()
+      // Replace instantiation placeholder
       content = content.replace(/bot = \[ServerName\]\(\)/g, `bot = ${className}()`);
 
-      // 3. Replace Transcript Header
-      // TRANSCRIPT TICKET - GalacticalMC -> TRANSCRIPT TICKET - [BotName]
+      // Replace transcript header
       content = content.replace(/TRANSCRIPT TICKET - GalacticalMC/g, `TRANSCRIPT TICKET - ${botName}`);
+      content = content.replace(/TRANSCRIPT TICKET - \[ServerName\]/g, `TRANSCRIPT TICKET - ${botName}`);
 
-      // 4. Replace Footer Text
-      // text="GalacticalMC Ticket System" -> text="[BotName] Ticket System"
+      // Replace footer text
       content = content.replace(/text="GalacticalMC Ticket System"/g, `text="${botName} Ticket System"`);
+      content = content.replace(/text="\[ServerName\] Ticket System"/g, `text="${botName} Ticket System"`);
 
-      // 5. Replace Status Name placeholder
-      // name="[ServerName]" -> name="[BotName]"
+      // Replace status name placeholder
       content = content.replace(/name="\[ServerName\]"/g, `name="${botName}"`);
 
-      // 6. Replace Token placeholder
-      // bot.run("[TOKEN]") -> bot.run("[ActualToken]")
+      // Replace token placeholder
       content = content.replace(/bot\.run\("\[TOKEN\]"\)/g, `bot.run("${token}")`);
 
       // Set headers for file download
