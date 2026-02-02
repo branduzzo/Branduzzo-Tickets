@@ -1,69 +1,62 @@
-import express from "express";
-import path from "path";
-import { promises as fs } from "fs";
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
+import fs from "fs/promises";
+import path from "path";
 
-export const registerRoutes = (app: express.Express) => {
-  app.get(api.health.path, (req, res) => {
-    res.json({ status: "ok" });
-  });
+export async function registerRoutes(
+  httpServer: Server,
+  app: Express
+): Promise<Server> {
 
   app.post(api.generate.path, async (req, res) => {
     try {
       const { botName, token, language } = api.generate.input.parse(req.body);
 
-      let templateFile = "main_en.txt";
-      if (language === "it") templateFile = "main_it.txt";
-      if (language === "es") templateFile = "main_es.txt";
+      // Select template based on language from request body
+      const templateFiles: Record<string, string> = {
+        en: "main_en.txt",
+        it: "main_it.txt",
+        es: "main_es.txt"
+      };
+      const templateFile = templateFiles[language] || "main_en.txt";
+      const templatePath = path.join(process.cwd(), "attached_assets", templateFile);
+      
+      let content: string;
+      try {
+        content = await fs.readFile(templatePath, "utf-8");
+      } catch (fileErr) {
+        console.error(`Template file not found: ${templatePath}`);
+        res.status(500).json({ message: "Template file not found" });
+        return;
+      }
 
-      const templatePath = path.join(
-        process.cwd(),
-        "attached_assets",
-        templateFile
-      );
+      // Sanitize bot name for class usage (PascalCase)
+      const className = botName
+        .replace(/[^a-zA-Z0-9]/g, " ")
+        .split(" ")
+        .filter(word => word.length > 0)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join("") || "MyBot";
 
-      let content = await fs.readFile(templatePath, "utf-8");
+      // Replace class definition placeholder [ServerName]
+      content = content.replace(/class \[ServerName\]\(commands\.Bot\):/g, `class ${className}(commands.Bot):`);
+      
+      // Replace instantiation placeholder
+      content = content.replace(/bot = \[ServerName\]\(\)/g, `bot = ${className}()`);
 
-      const className =
-        botName
-          .replace(/[^a-zA-Z0-9]/g, " ")
-          .split(" ")
-          .filter((w) => w.length > 0)
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join("") || "MyBot";
+      // Replace status name placeholder
+      content = content.replace(/name="\[ServerName\]"/g, `name="${botName}"`);
 
-      content = content.replace(
-        /class \[ServerName\]\(commands\.Bot\):/g,
-        `class ${className}(commands.Bot):`
-      );
-      content = content.replace(
-        /bot = \[ServerName\]\(\)/g,
-        `bot = ${className}()`
-      );
-      content = content.replace(
-        /TRANSCRIPT TICKET - \[ServerName\]/g,
-        `TRANSCRIPT TICKET - ${botName}`
-      );
-      content = content.replace(
-        /text="\[ServerName\] Ticket System"/g,
-        `text="${botName} Ticket System"`
-      );
-      content = content.replace(
-        /name="\[ServerName\]"/g,
-        `name="${botName}"`
-      );
-      content = content.replace(
-        /bot\.change_presence\([\s\S]*?name="\[ServerName\]"/g,
-        (match) => match.replace("[ServerName]", botName)
-      );
-      content = content.replace(
-        /bot\.run\("\[TOKEN\]"\)/g,
-        `bot.run("${token}")`
-      );
+      // Replace token placeholder
+      content = content.replace(/bot\.run\("\[TOKEN\]"\)/g, `bot.run("${token}")`);
 
+      // Set headers for file download
       res.setHeader("Content-Type", "text/x-python");
       res.setHeader("Content-Disposition", 'attachment; filename="main.py"');
+      
       res.send(content);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -74,4 +67,6 @@ export const registerRoutes = (app: express.Express) => {
       }
     }
   });
-};
+
+  return httpServer;
+}
